@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MDG Material Form (Cloud)</title>
+  <style>
+    :root {
+      --sap-bg: #f5f7f9;
+      --sap-surface: #ffffff;
+      --sap-primary: #0a6ed1;
+      --sap-border: #d7dce2;
+      --text: #222;
+      --muted: #69707a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+           background: var(--sap-bg); color: var(--text); }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: linear-gradient(180deg, #0a6ed1 0%, #095fb5 100%);
+      color: #fff; padding: 16px 20px; box-shadow: 0 2px 6px rgba(0,0,0,.12);
+    }
+    header h1 { margin: 0; font-size: 18px; letter-spacing: .3px; }
+    main { max-width: 1200px; margin: 24px auto; padding: 0 16px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card {
+      background: var(--sap-surface); border: 1px solid var(--sap-border);
+      border-radius: 12px; padding: 16px; box-shadow: 0 2px 14px rgba(30,40,60,.04);
+    }
+    .card h2 { margin-top: 0; font-size: 16px; color: #0f172a; }
+    label { font-size: 12px; color: var(--muted); display:block; margin-bottom: 6px; }
+    input, select, textarea {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--sap-border);
+      border-radius: 10px; outline: none; font-size: 14px; background: #fff;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--sap-primary);
+      box-shadow: 0 0 0 3px rgba(10,110,209,.1) }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top: 8px; }
+    .chip { font-size: 12px; padding: 6px 10px; border-radius: 999px; background:#eef4ff; color:#0a3d91; border:1px solid #d7e3ff }
+    .char-row { background:#f9fafb; border:1px solid var(--sap-border); border-radius:10px; padding:12px; margin-top:10px; }
+    .actions { display:flex; gap:10px; margin-top: 14px; }
+    button {
+      border: 1px solid transparent; background: var(--sap-primary); color: white;
+      border-radius: 10px; padding: 10px 14px; font-weight: 600; cursor: pointer;
+    }
+    button.secondary { background: #ffffff; color: #0a6ed1; border: 1px solid #bcd3f5; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid var(--sap-border); padding: 8px 10px; font-size: 13px; }
+    th { text-align: left; background: #f3f6fb; }
+    .muted { color: var(--muted); }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+  <header><h1>MDG Material Form (Cloud)</h1></header>
+  <main class="grid">
+    <section class="card">
+      <h2>1) Data Source & Context</h2>
+      <div class="row">
+        <div>
+          <label>DATA_URL (Apps Script Web App, doGet JSON)</label>
+          <input id="DATA_URL" placeholder="https://script.google.com/macros/s/.../exec (optional; leave blank to use local JSON)">
+        </div>
+        <div>
+          <label>SUBMIT_URL (Apps Script Web App, doPost)</label>
+          <input id="SUBMIT_URL" placeholder="https://script.google.com/macros/s/.../exec (optional)">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Server Reference</label>
+          <input id="serverRef" placeholder="TPR">
+        </div>
+        <div>
+          <label>MID Reference</label>
+          <input id="midRef" placeholder="20030">
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Use for Company</label>
+        <select id="companySelect"></select>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2) Select Class & Enter Characteristics</h2>
+      <label>Class</label>
+      <input id="classInput" list="classList" placeholder="Cari Class / Keyword... (case-insensitive)">
+      <datalist id="classList"></datalist>
+      <div id="charContainer" style="margin-top:8px;"></div>
+      <div class="actions">
+        <button id="genBtn">Generate Summary</button>
+        <button class="secondary" id="resetBtn">Reset</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3) Result</h2>
+      <div><span class="muted">Server Reference:</span> <strong id="sumServer">—</strong></div>
+      <div><span class="muted">MID Reference:</span> <strong id="sumMID">—</strong></div>
+      <div><span class="muted">Company Use For:</span> <strong id="sumCompany">—</strong></div>
+      <div><span class="muted">Hasil Mat Desc:</span> <strong id="sumMatDesc">—</strong></div>
+      <table id="resultTable" class="hidden">
+        <thead><tr>
+          <th>Class</th><th>Characteristic Name</th><th>Sequence</th>
+          <th>Cross-Plant</th><th>Mat Desc</th><th>Case</th>
+          <th>Prefix</th><th>Suffix</th><th>Without Space</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    // ---- CONFIG (you can prefill these then redeploy) ----
+    const PREFILL_DATA_URL = "https://script.google.com/macros/s/AKfycbz458ijJVQnITpoYFd35YgBDlOfdIhu5BSAhcrd5PiWA0o8uzOEBs1fJ-OqcQ9GzPSE/exec
+";  // Put your Apps Script doGet JSON URL here to make it persistent
+    const PREFILL_SUBMIT_URL = "https://script.google.com/macros/s/AKfycbws-Q9S7WNsXmUZnCYjsDkNY5n7kOGh0u1zhMzE_e8f9X6slXuXXl9eXX_j-l5mzKSB/exec"; // Put your Apps Script doPost URL here to store submissions
+    const LOCAL_JSON_URL = "./data/form_data.json"; // fallback JSON
+
+    // ---- RUNTIME STATE ----
+    let DATA = { classes:{}, char_desc:{}, char_attr:{}, char_values:{} };
+    let companyList = [
+      "PT Sayap Mas Utama","PT Wings Surya","PT Karunia Alam Segar","PT Prakarsa Alam Segar","PT. Multi Duta Utari",
+      "PT Tirta Alam Segar","PT Sriwijaya Alam Segar","PT Mitra Alam Segar","PT. Harum Alam Segar","PT Lestari Alam Segar"
+      // (trimmed for brevity — tambahkan list lengkap Anda di sini jika perlu)
+    ];
+
+    // ---- HELPERS ----
+    const $ = sel => document.querySelector(sel);
+    function el(tag, attrs={}, children=[]) {
+      const n = document.createElement(tag);
+      Object.entries(attrs).forEach(([k,v]) => {
+        if (k === "class") n.className = v;
+        else if (k === "text") n.textContent = v;
+        else n.setAttribute(k,v);
+      });
+      children.forEach(c => n.appendChild(c));
+      return n;
+    }
+
+    function normalizeCase(val, mode) {
+      if (!val) return "";
+      if (mode === "U") return val.toUpperCase();
+      if (mode === "L") return val.toLowerCase();
+      return val  // Proper: keep as user typed OR apply simple Title-Case if perlu
+        .replace(/\s+/g, ' ')
+        .replace(/(^|\s)\S/g, s => s.toUpperCase());
+    }
+
+    function buildMatDesc(rows) {
+      // rows: [{sequence, value, case, prefix, suffix, withoutSpace}, ...] sorted by sequence
+      const parts = [];
+      rows.sort((a,b)=> (a.sequence||0)-(b.sequence||0));
+      rows.forEach(r => {
+        if (!r.value) return;
+        let v = normalizeCase(r.value, r.case);
+        if (r.prefix) v = `${r.prefix}${v}`;
+        if (r.suffix) v = `${v}${r.suffix}`;
+        if (r.withoutSpace === "Y") parts.push(v);
+        else parts.push((parts.length? " ":"") + v);
+      });
+      return parts.join("").trim();
+    }
+
+    async function loadData() {
+      const urlInput = $("#DATA_URL");
+      const submitInput = $("#SUBMIT_URL");
+      urlInput.value = PREFILL_DATA_URL;
+      submitInput.value = PREFILL_SUBMIT_URL;
+
+      let src = urlInput.value.trim();
+      if (!src) src = LOCAL_JSON_URL;
+
+      try {
+        const res = await fetch(src, {cache:"no-store"});
+        DATA = await res.json();
+      } catch (e) {
+        console.error("Failed loading data source:", e);
+        alert("Gagal memuat sumber data. Pastikan DATA_URL benar atau file ./data/form_data.json tersedia.");
+      }
+
+      // fill classes
+      const dl = $("#classList");
+      dl.innerHTML = "";
+      Object.keys(DATA.classes||{}).forEach(cls => {
+        const opt = document.createElement("option");
+        opt.value = cls;
+        dl.appendChild(opt);
+      });
+
+      // fill companies
+      const compSel = $("#companySelect");
+      compSel.innerHTML = companyList.map(c=>`<option value="${c}">${c}</option>`).join("");
+    }
+
+    function renderCharsForClass(cls) {
+      const container = $("#charContainer");
+      container.innerHTML = "";
+      const rows = (DATA.classes[cls]||[]).slice().sort((a,b)=>(a.sequence||0)-(b.sequence||0));
+      rows.forEach(r => {
+        const charName = r.characteristic;
+        const desc = (DATA.char_desc||{})[charName] || "";
+        const attr = (DATA.char_attr||{})[charName] || {entry_required:false, additional_values:false};
+        const allowed = (DATA.char_values||{})[charName] || [];
+
+        const wrap = el("div", {class:"char-row"});
+        wrap.appendChild(el("div", {class:"muted", text: charName}));
+        wrap.appendChild(el("div", {class:"muted", text: desc || "—"}));
+
+        // input: dropdown jika ada allowed values & tidak additional, else text
+        let inputEl;
+        if (allowed.length && !attr.additional_values) {
+          inputEl = el("select", {id:`v_${charName}`},
+            [el("option",{value:"", text:"— pilih —"})].concat(
+              allowed.map(v => el("option",{value:v.value, text:v.value}))
+            )
+          );
+        } else {
+          inputEl = el("input", {id:`v_${charName}`, placeholder: "Isi nilai..."});
+        }
+        // required marker
+        if (attr.entry_required) {
+          const lab = el("label", {text:"Required"});
+          lab.style.color = "#e11d48";
+          lab.style.fontWeight = "600";
+          wrap.appendChild(lab);
+        }
+        wrap.appendChild(inputEl);
+        // hidden rule meta for summary build
+        const meta = el("div",{class:"muted"});
+        meta.innerHTML = `Seq: ${r.sequence ?? ""} • Case: ${r.case ?? "P"} • Prefix: ${r.prefix||""} • Suffix: ${r.suffix||""} • WithoutSpace: ${r.without_space||""}`;
+        wrap.appendChild(meta);
+        container.appendChild(wrap);
+      });
+    }
+
+    function collectRowsForClass(cls) {
+      const rows = (DATA.classes[cls]||[]).slice();
+      const out = [];
+      rows.forEach(r => {
+        const id = `#v_${r.characteristic}`;
+        const input = document.querySelector(id);
+        const value = input ? input.value : "";
+        out.push({
+          class: cls,
+          characteristic: r.characteristic,
+          sequence: Number(r.sequence)||0,
+          cross_plant: r.cross_plant || "*",
+          mat_desc_flag: r.mat_desc_flag || "Y",
+          case: r.case || "P",
+          prefix: r.prefix || "",
+          suffix: r.suffix || "",
+          without_space: (r.without_space||"") ? "Y":"",
+          value
+        });
+      });
+      return out.sort((a,b)=>a.sequence-b.sequence);
+    }
+
+    async function submitToSheet(payload) {
+      const url = $("#SUBMIT_URL").value.trim();
+      if (!url) return {ok:false, message:"SUBMIT_URL kosong — data tidak dikirim"};
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+      try { return await res.json(); } catch { return {ok:true}; }
+    }
+
+    // ---- INIT ----
+    window.addEventListener("DOMContentLoaded", async () => {
+      await loadData();
+
+      $("#classInput").addEventListener("change", (e)=> {
+        const cls = e.target.value.trim();
+        if (DATA.classes[cls]) renderCharsForClass(cls);
+      });
+
+      $("#genBtn").addEventListener("click", async ()=>{
+        const cls = $("#classInput").value.trim();
+        const server = $("#serverRef").value.trim();
+        const mid = $("#midRef").value.trim();
+        const company = $("#companySelect").value;
+
+        const rows = collectRowsForClass(cls);
+        const matDesc = buildMatDesc(rows.map(r => ({
+          sequence: r.sequence,
+          value: r.value,
+          case: r.case,
+          prefix: r.prefix,
+          suffix: r.suffix,
+          withoutSpace: r.without_space
+        })));
+
+        // Fill summary
+        $("#sumServer").textContent = server || "—";
+        $("#sumMID").textContent = mid || "—";
+        $("#sumCompany").textContent = company || "—";
+        $("#sumMatDesc").textContent = matDesc || "—";
+
+        // Table
+        const tb = $("#resultTable");
+        const body = tb.querySelector("tbody");
+        body.innerHTML = "";
+        rows.forEach(r => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${cls}</td><td>${r.characteristic}</td><td>${r.sequence}</td>
+            <td>${r.cross_plant||""}</td><td>${r.mat_desc_flag||""}</td>
+            <td>${r.case||""}</td><td>${r.prefix||""}</td><td>${r.suffix||""}</td>
+            <td>${r.without_space||""}</td>`;
+          body.appendChild(tr);
+        });
+        tb.classList.remove("hidden");
+
+        // Send to sheet (optional)
+        const submission = {
+          timestamp: new Date().toISOString(),
+          className: cls, server, mid, company, matDesc,
+          values: rows
+        };
+        const res = await submitToSheet(submission);
+        if (res && res.ok) console.log("Saved to sheet");
+        else console.warn("Not saved:", res);
+      });
+
+      $("#resetBtn").addEventListener("click", ()=> location.reload());
+    });
+  </script>
+</body>
+</html>
