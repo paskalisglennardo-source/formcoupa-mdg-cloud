@@ -1,6 +1,10 @@
 {
   "aiEnabled": true,
-  "aiProxyUrl": "https://muddy-feather-cefd.paskalis-glennardo.workers.dev",
+  "aiProxyUrl": "https://mdg-ai-proxy.paskalis-glennardo.workers.dev",
   "adminContact": "+6282323265275",
-  "adminName": "MDG Admin"
+  "adminName": "MDG Admin",
+  "aiModel": "gpt-4o-mini",
+  "aiVisionModel": "gpt-4o-mini",
+  "maxTokens": 1200,
+  "temperature": 0.4
 }
