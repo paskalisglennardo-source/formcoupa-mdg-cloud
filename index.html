@@ -11388,8 +11388,10 @@ function handleAiImage(input) {
   const file = input.files?.[0];
   if (!file) return;
 
-  // Compress image before storing (reduce payload for AI API)
-  compressImage(file, 800, 0.7).then(compressedDataUrl => {
+  // Compress image before storing (reduce payload for AI API).
+  // 1024px @ 0.82 keeps markings/brand text legible for the vision model
+  // while staying well under payload limits.
+  compressImage(file, 1024, 0.82).then(compressedDataUrl => {
     AI_STATE.imageData = compressedDataUrl;
     AI_STATE.imageName = file.name;
     document.getElementById('aiImgThumb').src = compressedDataUrl;
@@ -11594,6 +11596,14 @@ async function smartClassify(text, imageData) {
 
     // Remember the material keywords for follow-up questions
     if (data.keywords) AI_STATE.lastMaterialQuery = data.keywords;
+
+    // Diagnostic: if we sent an image but the worker reports it wasn't received
+    // or vision failed, surface it so the user isn't misled by a text-only guess.
+    if (imageData && data.imageReceived === false) {
+      addBotMessage('⚠️ Gambar tidak sampai ke server (payload mungkin terlalu besar). Coba gambar yang lebih kecil, atau ketik nama barangnya.');
+    } else if (imageData && data.visionOk === false && data.matched) {
+      addBotMessage('⚠️ Catatan: analisa gambar kurang optimal, hasil di bawah sebagian dari teks. Kirim ulang gambar lebih jelas untuk akurasi lebih baik.');
+    }
 
     const conf = data.confidence || 'Low';
     const confIcon = conf === 'High' ? '🟢' : conf === 'Medium' ? '🟡' : '🔴';
