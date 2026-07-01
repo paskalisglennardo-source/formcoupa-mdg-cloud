@@ -1,0 +1,12 @@
+{
+  "aiEnabled": true,
+  "aiProxyUrl": "https://mdg-ai-proxy-v5.paskalis-glennardo.workers.dev",
+  "adminContact": "+6282323265275",
+  "adminName": "MDG Admin",
+  "aiModel": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+  "aiVisionModel": "gpt-4o",
+  "maxTokens": 1200,
+  "temperature": 0.4,
+  "kbEnabled": true,
+  "kbUrl": "https://raw.githubusercontent.com/paskalisglennardo-source/formcoupa-mdg-cloud/main/data/knowledge_base.json"
+}
