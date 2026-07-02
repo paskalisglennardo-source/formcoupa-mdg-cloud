@@ -3,10 +3,27 @@
   "aiProxyUrl": "https://mdg-ai-proxy-v5.paskalis-glennardo.workers.dev",
   "adminContact": "+6282323265275",
   "adminName": "MDG Admin",
-  "aiModel": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-  "aiVisionModel": "gpt-4o",
+  "aiModel": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "aiVisionModel": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
   "maxTokens": 1200,
   "temperature": 0.4,
   "kbEnabled": true,
-  "kbUrl": "https://raw.githubusercontent.com/paskalisglennardo-source/formcoupa-mdg-cloud/main/data/knowledge_base.json"
+  "kbUrl": "https://raw.githubusercontent.com/paskalisglennardo-source/formcoupa-mdg-cloud/main/data/knowledge_base.json",
+  "aiProvider": "openrouter-only-free",
+  "fallbackModels": {
+    "text": [
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+      "qwen/qwen3.6-plus:free",
+      "qwen/qwen3-next-80b-a3b-instruct:free",
+      "deepseek/deepseek-v4-flash:free",
+      "deepseek/deepseek-chat-v3.1:free",
+      "openrouter/free"
+    ],
+    "vision": [
+      "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "qwen/qwen-2.5-vl-7b-instruct:free",
+      "openrouter/free"
+    ]
+  }
 }
