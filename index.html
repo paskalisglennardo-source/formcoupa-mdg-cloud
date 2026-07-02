@@ -1822,6 +1822,22 @@ body {
   align-self: flex-end;
   border-bottom-right-radius: 4px;
 }
+.ai-msg.user .ai-upload-thumb {
+  display: block;
+  max-width: 190px;
+  max-height: 190px;
+  object-fit: contain;
+  margin-top: 8px;
+  border-radius: var(--radius-md);
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+}
+.ai-msg.user .ai-upload-name {
+  display: block;
+  margin-top: 5px;
+  font-size: 0.72rem;
+  opacity: 0.85;
+}
 .ai-msg.system {
   background: var(--warning-bg);
   color: var(--warning);
@@ -11013,7 +11029,7 @@ const AI_CONFIG = {
   // - User TIDAK perlu input API key di browser.
   // - Frontend hanya membaca config milik owner (mis. ai-owner-config.json di GitHub Pages / repo).
   // - Request AI dikirim ke proxy endpoint milik owner, bukan langsung ke LLM provider.
-  // - Provider: Hugging Face Inference API (Qwen models, gratis)
+  // - Provider: OpenRouter free model chain (NVIDIA/Qwen/DeepSeek)
   ownerConfigUrl: './ai-owner-config.json',
   aiProxyUrl: '',
   aiEnabled: true,
@@ -11211,7 +11227,7 @@ async function callOwnerAi(payload) {
 
   // Add timeout (30s for vision with large images, 20s for chat)
   const hasImage = JSON.stringify(payload).length > 50000;
-  const timeoutMs = hasImage ? 45000 : 25000;
+  const timeoutMs = hasImage ? 75000 : 30000;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -11313,8 +11329,8 @@ function addBotMessage(html, actions) {
   scrollAiToBottom();
 }
 
-function addUserMessage(text) {
-  const msg = { role: 'user', text, ts: Date.now() };
+function addUserMessage(text, imageData = null, imageName = '') {
+  const msg = { role: 'user', text, imageData, imageName, ts: Date.now() };
   AI_STATE.messages.push(msg);
   renderAiMessage(msg);
   scrollAiToBottom();
@@ -11337,6 +11353,19 @@ function renderAiMessage(msg) {
   } else if (msg.role === 'user') {
     div.className = 'ai-msg user';
     div.textContent = msg.text;
+    if (msg.imageData) {
+      const img = document.createElement('img');
+      img.className = 'ai-upload-thumb';
+      img.src = msg.imageData;
+      img.alt = msg.imageName || 'uploaded image';
+      div.appendChild(img);
+      if (msg.imageName) {
+        const name = document.createElement('span');
+        name.className = 'ai-upload-name';
+        name.textContent = msg.imageName;
+        div.appendChild(name);
+      }
+    }
   } else {
     div.className = 'ai-msg bot';
     div.innerHTML = msg.html || '';
@@ -11389,9 +11418,9 @@ function handleAiImage(input) {
   if (!file) return;
 
   // Compress image before storing (reduce payload for AI API).
-  // 1024px @ 0.82 keeps markings/brand text legible for the vision model
-  // while staying well under payload limits.
-  compressImage(file, 1024, 0.82).then(compressedDataUrl => {
+  // 1600px @ 0.90 keeps labels/markings legible so the vision model analyzes the real image, not just text keywords.
+  // If the payload becomes too large, the Worker will return a clear diagnostic.
+  compressImage(file, 1600, 0.90).then(compressedDataUrl => {
     AI_STATE.imageData = compressedDataUrl;
     AI_STATE.imageName = file.name;
     document.getElementById('aiImgThumb').src = compressedDataUrl;
@@ -11473,8 +11502,10 @@ async function sendAiMessage() {
   if (!text && !AI_STATE.imageData) return;
   if (AI_STATE.processing) return;
 
-  const userText = text || (AI_STATE.imageData ? `[Image: ${AI_STATE.imageName}]` : '');
-  addUserMessage(userText);
+  const imageDataToSend = AI_STATE.imageData;
+  const imageNameToSend = AI_STATE.imageName;
+  const userText = text || (imageDataToSend ? `[Image uploaded for visual analysis]` : '');
+  addUserMessage(userText, imageDataToSend, imageNameToSend);
   input.value = '';
   input.style.height = 'auto';
 
@@ -11483,7 +11514,7 @@ async function sendAiMessage() {
   showTypingIndicator();
 
   try {
-    await processAiRequest(text, AI_STATE.imageData);
+    await processAiRequest(text, imageDataToSend);
   } catch (err) {
     hideTypingIndicator();
     addBotMessage(`❌ Error: ${err.message || 'Terjadi kesalahan'}. Silakan coba lagi.`);
@@ -11572,7 +11603,7 @@ async function smartClassify(text, imageData) {
       context: ctx || undefined,
       image: imageData || undefined,
       useWeb: true,
-      useLlmParse: false   // local extraction is deterministic & reliable; free model echoes prompt
+      useLlmParse: false   // deterministic KB extraction; image analysis is handled separately from actual pixels
     });
     hideTypingIndicator();
 
@@ -11720,7 +11751,7 @@ async function validateCharsWithKb(showToastResult = true) {
 }
 
 // ============================================
-// IMAGE ANALYSIS (OpenAI Vision)
+// IMAGE ANALYSIS (OpenRouter Vision)
 // ============================================
 
 async function analyzeImageForClass(text, imageData, kbContext) {
@@ -11752,8 +11783,8 @@ Respond in Indonesian.`;
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: [
-          { type: 'image_url', image_url: { url: imageData, detail: 'low' } },
-          { type: 'text', text: text || 'Analisis gambar ini dan sarankan class SAP MDG yang tepat.' }
+          { type: 'text', text: text || 'Analisis gambar ini dan sarankan class SAP MDG yang tepat. Jawab berdasarkan gambar yang diupload, bukan nama file atau keyword saja.' },
+          { type: 'image_url', image_url: { url: imageData, detail: 'high' } }
         ]}
       ]
     });
@@ -11792,13 +11823,13 @@ Respond in Indonesian.`;
         `Kemungkinan penyebab:<br>` +
         `• Cloudflare Worker belum aktif/deploy<br>` +
         `• Worker belum handle CORS preflight (OPTIONS)<br>` +
-        `• <code>HF_API_KEY</code> belum di-set di Worker environment<br><br>` +
+        `• <code>OPENROUTER_API_KEY</code> belum di-set di Worker environment<br><br>` +
         `<strong>Cara fix:</strong><br>` +
         `1. Buka <code>dashboard.cloudflare.com</code> → Workers<br>` +
         `2. Pastikan worker <code>${esc(AI_CONFIG.aiProxyUrl)}</code> aktif<br>` +
-        `3. Paste kode Worker terbaru (versi Hugging Face)<br>` +
-        `4. Set <code>HF_API_KEY</code> di Settings → Variables<br>` +
-        `   (Dapatkan gratis di huggingface.co/settings/tokens)<br><br>` +
+        `3. Paste kode Worker terbaru (OpenRouter-only free fallback)<br>` +
+        `4. Set <code>OPENROUTER_API_KEY</code> di Settings → Variables<br>` +
+        `   (Dapatkan di openrouter.ai/keys)<br><br>` +
         `<em>Detail error: ${esc(errMsg)}</em>`,
         [
           { label: '🔄 Coba Lagi', action: 'retry', value: 'Analisis gambar yang saya upload' },
@@ -11915,7 +11946,7 @@ RULES:
         `❌ <strong>Gagal menghubungi AI server</strong><br><br>` +
         `Worker URL: <code>${esc(AI_CONFIG.aiProxyUrl)}</code><br><br>` +
         `Pastikan Worker sudah di-deploy dengan kode terbaru yang handle CORS.<br>` +
-        `Cek juga: <code>HF_API_KEY</code> sudah di-set di Worker variables.`,
+        `Cek juga: <code>OPENROUTER_API_KEY</code> sudah di-set di Worker variables.`,
         [
           { label: '🔄 Coba Lagi', action: 'retry', value: text },
           { label: '🔍 Cari Lokal', action: 'search_local', value: text },
@@ -12505,13 +12536,13 @@ async function testAiConnection() {
     const healthData = await healthResp.json().catch(() => null);
     
     if (healthData?.ok) {
-      addSystemMessage('✅ Health check OK. hasKey=' + (healthData.hasKey ? 'YES' : 'NO') + ', version=' + (healthData.version || '?'));
-      if (!healthData.hasKey) {
+      addSystemMessage('✅ Health check OK. hasOpenRouter=' + (healthData.hasOpenRouter ? 'YES' : 'NO') + ', provider=' + (healthData.provider || '?'));
+      if (!healthData.hasOpenRouter) {
         hideTypingIndicator();
         addBotMessage(
-          '⚠️ <strong>Worker aktif tapi HF_API_KEY belum di-set!</strong><br><br>' +
-          'Buka Cloudflare Dashboard → Workers → Settings → Variables → tambahkan <code>HF_API_KEY</code>.<br>' +
-          'Dapatkan token gratis di <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a>'
+          '⚠️ <strong>Worker aktif tapi OPENROUTER_API_KEY belum di-set!</strong><br><br>' +
+          'Buka Cloudflare Dashboard → Workers → Settings → Variables → tambahkan <code>OPENROUTER_API_KEY</code>.<br>' +
+          'Dapatkan token di <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>'
         );
         return;
       }
@@ -12537,12 +12568,12 @@ async function testAiConnection() {
       diagHtml += '<strong>Cara fix — lakukan SEMUA ini:</strong><br><br>';
       diagHtml += '<strong>1.</strong> Buka <a href="https://dash.cloudflare.com" target="_blank" style="color:#3b82f6">dash.cloudflare.com</a> → Workers → pilih worker<br>';
       diagHtml += '<strong>2.</strong> Klik tab <strong>"Code"</strong> → <strong>"Edit Code"</strong><br>';
-      diagHtml += '<strong>3.</strong> <strong>Hapus SEMUA kode lama</strong> → paste kode Worker v3.1 terbaru<br>';
+      diagHtml += '<strong>3.</strong> <strong>Hapus SEMUA kode lama</strong> → paste kode Worker OpenRouter free terbaru<br>';
       diagHtml += '<strong>4.</strong> Klik <strong>Deploy</strong><br>';
       diagHtml += '<strong>5.</strong> Di tab <strong>Settings → Variables</strong>: jika ada variable <code>ALLOWED_ORIGINS</code>, <strong>HAPUS</strong><br>';
-      diagHtml += '<strong>6.</strong> Pastikan <code>HF_API_KEY</code> = token HuggingFace Anda<br><br>';
+      diagHtml += '<strong>6.</strong> Pastikan <code>OPENROUTER_API_KEY</code> = token OpenRouter Anda<br><br>';
       diagHtml += '<em>Kode Worker lama tidak handle CORS dengan benar untuk GitHub Pages.<br>';
-      diagHtml += 'Worker v3.1 baru secara otomatis meng-reflect Origin header dari request.</em>';
+      diagHtml += 'Worker OpenRouter free baru secara otomatis meng-reflect Origin header dari request.</em>';
     } else {
       diagHtml += 'Worker mungkin belum deploy atau URL salah.<br>';
     }
@@ -12581,15 +12612,15 @@ async function testAiConnection() {
         '✅ <strong>AI Connection Test BERHASIL!</strong><br><br>' +
         '• Worker: <code>' + esc(proxyUrl) + '</code> ✅<br>' +
         '• CORS: OK ✅<br>' +
-        '• Hugging Face (Qwen) API: OK ✅<br>' +
+        '• OpenRouter free model API: OK ✅<br>' +
         '• Response: "' + esc(chatData.choices[0].message.content.substring(0, 50)) + '"<br><br>' +
         '🎉 Semua fitur AI (chat, vision, search) siap digunakan!'
       );
     } else if (chatData.error) {
       addBotMessage(
-        '⚠️ <strong>Worker aktif, tapi Hugging Face error:</strong><br>' +
+        '⚠️ <strong>Worker aktif, tapi OpenRouter error:</strong><br>' +
         esc(chatData.error.message || JSON.stringify(chatData.error).substring(0, 300)) + '<br><br>' +
-        'Pastikan <code>HF_API_KEY</code> valid. Dapatkan di <a href="https://huggingface.co/settings/tokens" target="_blank">huggingface.co/settings/tokens</a>'
+        'Pastikan <code>OPENROUTER_API_KEY</code> valid. Dapatkan di <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a>'
       );
     } else {
       addBotMessage('⚠️ Response format tidak dikenali: ' + esc(JSON.stringify(chatData).substring(0, 200)));
@@ -12598,7 +12629,7 @@ async function testAiConnection() {
     hideTypingIndicator();
     addBotMessage(
       '❌ <strong>POST request gagal:</strong> ' + esc(e.message) + '<br><br>' +
-      'Kemungkinan: CORS belum di-handle di Worker. Pastikan Worker v3.1 terbaru sudah di-deploy.'
+      'Kemungkinan: CORS belum di-handle di Worker. Pastikan Worker OpenRouter free terbaru sudah di-deploy.'
     );
   }
 }
