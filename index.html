@@ -3105,6 +3105,10 @@ body {
     </div>
     <div class="ai-quick-actions">
       <button onclick="aiQuickAction('suggest_class')">🔍 Suggest Class</button>
+      <button onclick="aiQuickAction('class_rules')">🧭 Class Rules</button>
+      <button onclick="aiQuickAction('photo_guide')">📷 Photo Guide</button>
+      <button onclick="aiQuickAction('sparepart_cues')">🔩 Sparepart Cues</button>
+      <button onclick="aiQuickAction('promotion_cues')">🎁 Promo Cues</button>
       <button onclick="aiQuickAction('validate')">✅ Validate Form</button>
       <button onclick="aiQuickAction('help_fill')">📝 Help Fill</button>
       <button onclick="aiQuickAction('search_web')">🌐 Web Search</button>
@@ -11047,8 +11051,10 @@ let AI_STATE = {
   imageData: null,
   imageName: '',
   processing: false,
-  conversationHistory: [],
-  lastMaterialQuery: '',
+  sessionId: getAiSessionId(),
+  memoryEnabled: true,
+  conversationHistory: loadAiConversationHistory(),
+  lastMaterialQuery: loadLastMaterialQuery(),
   kbVersion: 0,
 };
 
@@ -11101,6 +11107,103 @@ function addClassMapping(keyword, className) {
   if (!kb.classMap[k].includes(className)) {
     kb.classMap[k].push(className);
     saveKnowledgeBase(kb);
+  }
+}
+
+
+// ============================================
+// CONVERSATION MEMORY (Browser + Worker KV)
+// ============================================
+
+function getAiSessionId() {
+  try {
+    let id = localStorage.getItem('mdg_ai_session_id');
+    if (!id) {
+      id = (window.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : ('mdg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2));
+      localStorage.setItem('mdg_ai_session_id', id);
+    }
+    return id;
+  } catch (e) {
+    return 'mdg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
+  }
+}
+
+function loadAiConversationHistory() {
+  try {
+    const raw = localStorage.getItem('mdg_ai_conversation_history');
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.slice(-20) : [];
+  } catch (e) { return []; }
+}
+
+function saveAiConversationHistory() {
+  try {
+    if (!AI_STATE || !AI_STATE.memoryEnabled) return;
+    const clean = (AI_STATE.conversationHistory || []).slice(-20).map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m.content || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1200),
+    })).filter(m => m.content);
+    localStorage.setItem('mdg_ai_conversation_history', JSON.stringify(clean));
+  } catch (e) { console.warn('Memory save failed:', e); }
+}
+
+function loadLastMaterialQuery() {
+  try { return localStorage.getItem('mdg_ai_last_material_query') || ''; }
+  catch (e) { return ''; }
+}
+
+function saveLastMaterialQuery() {
+  try {
+    if (AI_STATE && AI_STATE.lastMaterialQuery) {
+      localStorage.setItem('mdg_ai_last_material_query', AI_STATE.lastMaterialQuery);
+    }
+  } catch (e) {}
+}
+
+function plainTextFromHtml(html) {
+  const div = document.createElement('div');
+  div.innerHTML = String(html || '');
+  return (div.textContent || div.innerText || '').replace(/\s+/g, ' ').trim();
+}
+
+function rememberAiTurn(userText, assistantText) {
+  if (!AI_STATE.memoryEnabled) return;
+  if (userText) AI_STATE.conversationHistory.push({ role: 'user', content: String(userText).slice(0, 1200) });
+  if (assistantText) AI_STATE.conversationHistory.push({ role: 'assistant', content: String(assistantText).replace(/<[^>]+>/g, ' ').slice(0, 1200) });
+  if (AI_STATE.conversationHistory.length > 20) AI_STATE.conversationHistory = AI_STATE.conversationHistory.slice(-20);
+  saveAiConversationHistory();
+}
+
+function buildClientMemoryPayload() {
+  const kb = getKnowledgeBase();
+  const classMap = {};
+  Object.keys(kb.classMap || {}).slice(-60).forEach(k => { classMap[k] = kb.classMap[k]; });
+  return {
+    sessionId: AI_STATE.sessionId,
+    recent: (AI_STATE.conversationHistory || []).slice(-10),
+    lastMaterialQuery: AI_STATE.lastMaterialQuery || '',
+    classMap,
+    queries: (kb.queries || []).slice(-10).map(q => ({
+      q: String(q.q || '').slice(0, 180),
+      r: String(q.r || '').slice(0, 220),
+    })),
+  };
+}
+
+async function resetAiMemory() {
+  try {
+    localStorage.removeItem('mdg_ai_conversation_history');
+    localStorage.removeItem('mdg_ai_last_material_query');
+    AI_STATE.conversationHistory = [];
+    AI_STATE.lastMaterialQuery = '';
+    if (isOwnerAiReady()) {
+      await callOwnerAi({ mode: 'memory_clear', sessionId: AI_STATE.sessionId, clientMemory: { recent: [] } });
+    }
+    addBotMessage('🧹 Memory percakapan sudah di-reset untuk browser/session ini.');
+  } catch (e) {
+    addBotMessage('⚠️ Gagal reset server memory, tapi local memory sudah dibersihkan.');
   }
 }
 
@@ -11196,6 +11299,8 @@ async function ensureOwnerAiConfigLoaded() {
   return AI_CONFIG;
 }
 
+console.log('MDG AI patch', AI_APP_PATCH_VERSION);
+
 function isOwnerAiReady() {
   return !!(AI_CONFIG.aiEnabled && AI_CONFIG.aiProxyUrl);
 }
@@ -11224,6 +11329,12 @@ async function callOwnerAi(payload) {
   if (!AI_CONFIG.aiProxyUrl) {
     throw new Error('AI proxy URL belum dikonfigurasi oleh pemilik aplikasi. Hubungi admin.');
   }
+
+  // Attach anonymous memory/session context to every AI call.
+  payload = { ...(payload || {}) };
+  if (!payload.sessionId) payload.sessionId = AI_STATE.sessionId || getAiSessionId();
+  if (!payload.session_id) payload.session_id = payload.sessionId;
+  if (!payload.clientMemory) payload.clientMemory = buildClientMemoryPayload();
 
   // Add timeout (30s for vision with large images, 20s for chat)
   const hasImage = JSON.stringify(payload).length > 50000;
@@ -11543,6 +11654,13 @@ async function processAiRequest(text, imageData) {
     ).join('\n');
   }
 
+  const mem = buildClientMemoryPayload();
+  if (mem.lastMaterialQuery || (mem.recent && mem.recent.length)) {
+    kbContext += '\n\n[Recent Conversation Memory]:\n' +
+      (mem.lastMaterialQuery ? `Last material keywords: ${mem.lastMaterialQuery}\n` : '') +
+      (mem.recent || []).slice(-6).map(m => `${m.role}: ${String(m.content || '').slice(0, 220)}`).join('\n');
+  }
+
   // 2. If image is uploaded, AI proxy is required
   if (imageData) {
     if (!isOwnerAiReady()) {
@@ -11626,7 +11744,10 @@ async function smartClassify(text, imageData) {
     }
 
     // Remember the material keywords for follow-up questions
-    if (data.keywords) AI_STATE.lastMaterialQuery = data.keywords;
+    if (data.keywords) {
+      AI_STATE.lastMaterialQuery = data.keywords;
+      saveLastMaterialQuery();
+    }
 
     // Diagnostic: if we sent an image but the worker reports it wasn't received
     // or vision failed, surface it so the user isn't misled by a text-only guess.
@@ -11688,6 +11809,7 @@ async function smartClassify(text, imageData) {
     });
 
     addBotMessage(html, actions.length ? actions : null);
+    rememberAiTurn(text || (imageData ? '[Image uploaded for visual classification]' : ''), plainTextFromHtml(html));
 
     // remember mapping
     if (text && data.class) addClassMapping(text, data.class);
@@ -11805,6 +11927,7 @@ Respond in Indonesian.`;
     actions.push({ label: '🌐 Cari di Web', action: 'search_web', value: searchTerm });
 
     addBotMessage(formatAiResponse(answer), actions.length > 0 ? actions : null);
+    rememberAiTurn(text || '[Image uploaded for visual analysis]', answer);
 
     // Save to KB
     addToKb('class_suggestion', { query: text, image: true, result: answer });
@@ -11915,6 +12038,7 @@ RULES:
     if (AI_STATE.conversationHistory.length > 20) {
       AI_STATE.conversationHistory = AI_STATE.conversationHistory.slice(-12);
     }
+    saveAiConversationHistory();
 
     // Build action buttons
     const actions = [];
@@ -12050,7 +12174,7 @@ async function searchDDGS(query) {
         const proxyResp = await fetch(AI_CONFIG.aiProxyUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: 'search', query: query + ' material specification' })
+          body: JSON.stringify({ mode: 'search', query: query + ' material specification', sessionId: AI_STATE.sessionId, session_id: AI_STATE.sessionId })
         });
         data = await proxyResp.json();
         if (data.error) throw new Error(data.error.message);
@@ -12281,6 +12405,22 @@ function aiQuickAction(action) {
           '💬 Ketik deskripsi atau upload gambar di bawah.'
         );
       }
+      break;
+    }
+    case 'class_rules': {
+      sendAiText('Bagaimana cara menentukan class material dengan benar dan kapan harus manual review?');
+      break;
+    }
+    case 'photo_guide': {
+      sendAiText('Foto apa yang dibutuhkan agar klasifikasi gambar sparepart dan promotion item akurat?');
+      break;
+    }
+    case 'sparepart_cues': {
+      sendAiText('Apa ciri khas sparepart dan bukti apa yang harus dipakai untuk klasifikasi ZSI1?');
+      break;
+    }
+    case 'promotion_cues': {
+      sendAiText('Apa ciri khas promotion item/POSM dan pembeda POSM display dengan signage label?');
       break;
     }
     case 'validate':
